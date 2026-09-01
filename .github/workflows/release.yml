@@ -24,7 +24,7 @@ jobs:
     name: Build seed.iso and publish the release
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
         with:
           ref: ${{ inputs.tag || github.ref }}
 
@@ -81,14 +81,14 @@ jobs:
             echo
             echo '---'
             echo
-            echo '**Installation:** download `seed.iso`, attach it to the VM as a second CD drive next to the Ubuntu Server ISO and boot. See the [README](../../blob/main/README.md) and [docs/INSTALLATION.md](../../blob/main/docs/INSTALLATION.md).'
+            echo '**Installation:** download `seed.iso`, attach it to the VM as a second CD drive next to the Ubuntu Server ISO and boot. See the [README](../../blob/main/README.md) and the [installation guide](../../wiki/Installation).'
             echo
             echo 'Default login after the installation: `ubuntu-admin` / `ubuntu` - change it immediately with `sudo ~/get-scripts.sh change-password.sh`.'
             echo 'RELEASE_NOTES_EOF'
           } >> "$GITHUB_OUTPUT"
 
       - name: Publish the release
-        uses: softprops/action-gh-release@v2
+        uses: softprops/action-gh-release@v3
         with:
           tag_name: ${{ steps.version.outputs.tag }}
           name: ${{ steps.version.outputs.tag }}
