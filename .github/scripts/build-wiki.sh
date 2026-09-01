@@ -110,6 +110,23 @@ render_page() {
       (\#[^)]*)?                    # optional anchor
       \)
     }{"](" . ($1 eq "README" ? "Home" : $1) . ($2 // "") . ")"}gex;
+
+    # 3. Anchors need the "user-content-" prefix in the wiki.
+    #    GitHub renders headings with id="user-content-<slug>" everywhere, but
+    #    only on repository pages does its JavaScript also make the short
+    #    "#<slug>" jump there. On wiki pages that mapping does not exist, so a
+    #    plain "#overview" link simply does not scroll. Writing the full id
+    #    makes the browser do it natively.
+    #    Absolute URLs are skipped - those point at repository pages, where the
+    #    short form is the correct one.
+    s{
+      \]\(
+      (?!https?://)                 # not an absolute URL
+      ([^)\#\s]*)                   # page name, may be empty for a same-page link
+      \#(?!user-content-)           # an anchor that is not prefixed yet
+      ([^)\s]*)
+      \)
+    }{"](" . $1 . "#user-content-" . $2 . ")"}gex;
   ' < "$src" > "$dest"
 }
 

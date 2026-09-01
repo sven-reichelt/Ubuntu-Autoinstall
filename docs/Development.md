@@ -131,6 +131,12 @@ pages:
   because that is how the wiki resolves them.
 - Links pointing out of `docs/` (`../autoinstall/user-data`) become absolute
   URLs into the repository, so they still work from the wiki.
+- Anchors get the `user-content-` prefix (`#overview` →
+  `#user-content-overview`). GitHub renders headings with
+  `id="user-content-<slug>"` everywhere, but only on repository pages does its
+  JavaScript also make the short `#<slug>` jump there — on wiki pages a plain
+  anchor link does not scroll at all. Anchors inside absolute repository URLs
+  keep the short form, which is the correct one there.
 - `_Sidebar.md` and `_Footer.md` are generated from a fixed page order in the
   script. Adding a page to `docs/` without adding it to that order makes the
   script fail — the same "both directions must agree" idea as the script

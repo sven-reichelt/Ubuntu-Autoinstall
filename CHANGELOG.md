@@ -19,6 +19,14 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   `CHANGELOG.md` and `docs/*.md` must resolve.
 - Release and pre-release badges in the README.
 
+### Fixed
+
+- Anchor links did not scroll on wiki pages. GitHub renders headings with
+  `id="user-content-<slug>"` everywhere, but only repository pages carry the
+  JavaScript that also makes the short `#<slug>` jump there. `build-wiki.sh`
+  now rewrites anchors to the full id for the wiki, while anchors inside
+  absolute repository URLs keep the short form.
+
 ### Changed
 
 - `README.md` is now a landing page (111 instead of 452 lines): what it is, how
