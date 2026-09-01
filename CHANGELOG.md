@@ -21,6 +21,16 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
+- `install-hfs.sh` left behind a server that could not be administered
+  remotely. HFS creates accounts through the Admin-panel only from localhost,
+  so on a headless server there was no way in. The script now asks for the
+  password of the `admin` account and seeds it through HFS's `create-admin`
+  configuration entry, which HFS consumes and removes again. It verifies that
+  the account really appeared instead of reporting success blindly, and
+  repairs an existing installation that has no account. `--admin-password`
+  sets it non-interactively; `--yes` generates a random one and prints it.
+- `--help` no longer requires root in `install-hfs.sh` and `system-update.sh` —
+  the root check ran before the argument parsing.
 - Anchor links did not scroll on wiki pages. GitHub renders headings with
   `id="user-content-<slug>"` everywhere, but only repository pages carry the
   JavaScript that also makes the short `#<slug>` jump there. `build-wiki.sh`

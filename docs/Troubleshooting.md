@@ -170,6 +170,39 @@ docker compose -f /opt/hfs/docker-compose.yml logs -f
 
 A first start can take a moment while the image initialises `/opt/hfs/data`.
 
+### install-hfs.sh: I cannot log in to the Admin-panel
+
+HFS creates accounts through the Admin-panel only from localhost, and it lets
+the panel be opened without credentials from there — so over the network you get
+a login prompt with no account behind it. The script seeds the account through
+HFS's `create-admin` entry; if that did not work, the entry is still sitting in
+the configuration file:
+
+```bash
+grep create-admin /opt/hfs/data/config.yaml
+```
+
+If it is still there, the container is not running or not reading the file:
+
+```bash
+docker compose -f /opt/hfs/docker-compose.yml ps
+docker compose -f /opt/hfs/docker-compose.yml logs -f
+```
+
+HFS reloads `config.yaml` as soon as it changes, so once the container runs the
+account appears and the entry disappears by itself.
+
+### install-hfs.sh: I forgot the admin password
+
+Add the entry again and save — no restart needed:
+
+```bash
+echo "create-admin: 'new-password'" | sudo tee -a /opt/hfs/data/config.yaml
+```
+
+Quote the password in single quotes, and double any single quote inside it
+(`it's` → `'it''s'`).
+
 ### docker: permission denied
 
 The user was added to the `docker` group, but group membership only takes effect

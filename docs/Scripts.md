@@ -164,9 +164,10 @@ Installs [HFS](https://rejetto.com/hfs) (HTTP File Server) as a Docker
 container, including Docker itself.
 
 ```bash
-sudo ~/get-scripts.sh install-hfs.sh              # interactive, asks for the port
-sudo ~/scripts/install-hfs.sh --port 8080         # non-interactive
-sudo ~/scripts/install-hfs.sh --shares /srv/data --yes
+sudo ~/get-scripts.sh install-hfs.sh                  # asks for port and password
+sudo ~/scripts/install-hfs.sh --port 8080             # port set, still asks for the password
+sudo ~/scripts/install-hfs.sh --admin-password 'secret' --port 8080
+sudo ~/scripts/install-hfs.sh --shares /srv/data --yes # generates a random password
 ```
 
 | | |
@@ -177,6 +178,7 @@ sudo ~/scripts/install-hfs.sh --shares /srv/data --yes
 | Port | asked interactively, default `80`, set via `HFS_PORT` |
 | Networking | `network_mode: host` |
 | Restart policy | `unless-stopped` |
+| Admin account | `admin`, password asked interactively |
 
 **Docker** comes from the official Docker repository (`docker-ce` plus the
 compose plugin). If Docker publishes no suite for the running Ubuntu release
@@ -189,8 +191,42 @@ HFS sees the real client IP addresses in its log. The price is that there is no
 port mapping, so the chosen port must be free on the host — the script warns if
 it is not.
 
-> The image creates a default account **`admin` / `please-change`**. Change it
-> in the admin panel (`http://<SERVER-IP>:<PORT>/~/admin`) immediately.
+#### The admin account
+
+HFS only lets you create an account through the Admin-panel **from localhost**,
+and it lets the Admin-panel be opened without credentials from localhost too
+(`localhost_admin`, default `true`). On a headless server that is precisely
+where you are not: you reach the panel over the network, it asks for a login,
+and there is no account to log in with.
+
+The way out is a special configuration entry that HFS understands:
+
+```yaml
+create-admin: <password>
+```
+
+HFS reloads `config.yaml` as soon as it changes, creates the account, and
+**removes that entry again** — so the password does not stay on disk in clear
+text. The script does this for you:
+
+- On a fresh installation it writes `/opt/hfs/data/config.yaml` before the first
+  start, with your password and the `/shares` entry the image would create
+  itself.
+- If a `config.yaml` exists but holds no account, it appends the entry — that is
+  the case if a container was started before without an account being set up.
+- If an account already exists, it is left untouched.
+
+Afterwards the script waits until the entry has disappeared and an `accounts:`
+section is there, and reports the result. If that does not happen within 60
+seconds it says so instead of claiming success on a server you cannot
+administer.
+
+To reset a forgotten password, add the line yourself and save — HFS picks it up
+while running:
+
+```bash
+echo "create-admin: 'new-password'" | sudo tee -a /opt/hfs/data/config.yaml
+```
 
 Everyday commands:
 

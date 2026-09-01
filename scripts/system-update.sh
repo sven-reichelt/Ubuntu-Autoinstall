@@ -16,6 +16,18 @@
 # =============================================================================
 set -euo pipefail
 
+# --- Help works without root ------------------------------------------------
+# The root check below would otherwise make "--help" fail for the one case
+# where it is needed most: finding out how to call the script.
+for arg in "$@"; do
+  case "$arg" in
+    -h|--help)
+      sed -n '/^# USAGE:/,/^# LOG:/p' "$0" | sed 's/^#\{1,\} \{0,1\}//'
+      exit 0
+      ;;
+  esac
+done
+
 # --- Must run as root -------------------------------------------------------
 if [[ $EUID -ne 0 ]]; then
   echo "Please start with sudo:  sudo $0 ${*:-}"

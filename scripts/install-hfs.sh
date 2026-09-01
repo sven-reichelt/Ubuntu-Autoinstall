@@ -8,28 +8,56 @@
 # What the script does:
 #   1. Installs Docker CE from the official Docker repository (if missing)
 #   2. Creates /opt/hfs/docker-compose.yml plus the data and share directories
-#   3. Starts the container with 'docker compose up -d'
+#   3. Sets up the admin account with a password of your choosing
+#   4. Starts the container with 'docker compose up -d'
 #
 # The container uses host networking, as recommended by the HFS Docker wiki -
 # that is the only way HFS sees the real client IP addresses in its log. The
 # listening port is therefore not mapped but set through the HFS_PORT
 # environment variable.
 #
+# ADMIN ACCOUNT: HFS lets you create an account through the Admin-panel only
+# from localhost. On a headless server that is exactly where you are not, so
+# the account has to be seeded through the configuration file. HFS has a
+# special config entry for it:
+#
+#   create-admin: <password>
+#
+# HFS reloads config.yaml as soon as it changes, creates the account and then
+# removes that entry again - so the password does not stay on disk in clear
+# text. This script writes the entry, waits until HFS has consumed it and
+# reports the result. Without it you would end up with a running server you
+# cannot administer remotely.
+#
 # UPDATE: simply run the script again. An existing installation is detected,
 # the image is pulled and the container recreated - the configuration under
-# /opt/hfs/data is kept.
+# /opt/hfs/data and the existing accounts are kept.
 #
 # USAGE:
-#   sudo ./install-hfs.sh                     interactive (asks for the port)
-#   sudo ./install-hfs.sh --port 8080         set the port, no questions
+#   sudo ./install-hfs.sh                     interactive (asks for port + password)
+#   sudo ./install-hfs.sh --port 8080         set the port, no question about it
+#   sudo ./install-hfs.sh --admin-password X  set the admin password, no question
 #   sudo ./install-hfs.sh --shares /srv/data  use a different share directory
-#   sudo ./install-hfs.sh --yes               accept all defaults
+#   sudo ./install-hfs.sh --yes               accept all defaults; generates a
+#                                             random admin password and prints it
 #
 # LOG: the complete output is appended to /var/log/hfs-install.log.
 #
 # Source: https://github.com/rejetto/hfs/wiki/Docker
 # =============================================================================
 set -euo pipefail
+
+# --- Help works without root ------------------------------------------------
+# The root check below would otherwise make "--help" fail for the one case
+# where it is needed most: finding out how to call the script.
+for arg in "$@"; do
+  case "$arg" in
+    -h|--help)
+      sed -n '/^# USAGE:/,/^# LOG:/p' "$0" | sed 's/^#\{1,\} \{0,1\}//'
+      exit 0
+      ;;
+  esac
+done
 
 # --- Must run as root -------------------------------------------------------
 if [[ $EUID -ne 0 ]]; then
@@ -42,17 +70,24 @@ HFS_DIR="/opt/hfs"
 DATA_DIR="$HFS_DIR/data"
 SHARES_DIR="/srv/hfs/shares"
 COMPOSE_FILE="$HFS_DIR/docker-compose.yml"
+CONFIG_FILE="$DATA_DIR/config.yaml"
 IMAGE="rejetto/hfs:latest"
 CONTAINER_NAME="hfs"
 HFS_PORT="80"
+ADMIN_USER="admin"
+ADMIN_PASSWORD=""
 ASSUME_YES=0
 PORT_GIVEN=0
+ADMIN_PASSWORD_GIVEN=0
+ADMIN_PASSWORD_GENERATED=0
 
 # --- Arguments --------------------------------------------------------------
 while [[ $# -gt 0 ]]; do
   case "$1" in
     -p|--port)   HFS_PORT="${2:-}"; PORT_GIVEN=1; shift 2 ;;
     -s|--shares) SHARES_DIR="${2:-}"; shift 2 ;;
+    -A|--admin-password)
+                 ADMIN_PASSWORD="${2:-}"; ADMIN_PASSWORD_GIVEN=1; shift 2 ;;
     -y|--yes)    ASSUME_YES=1; shift ;;
     -h|--help)   sed -n '/^# USAGE:/,/^# LOG:/p' "$0" | sed 's/^#\{1,\} \{0,1\}//'; exit 0 ;;
     *)           echo "Unknown option: $1  (see --help)"; exit 1 ;;
@@ -134,7 +169,7 @@ fi
 
 # --- 1. Install Docker -------------------------------------------------------
 echo
-echo "==> [1/4] Making sure Docker is available"
+echo "==> [1/5] Making sure Docker is available"
 export DEBIAN_FRONTEND=noninteractive
 
 install_docker_official() {
@@ -195,7 +230,7 @@ fi
 
 # --- 2. Directories and compose file ----------------------------------------
 echo
-echo "==> [2/4] Preparing directories and configuration"
+echo "==> [2/5] Preparing directories and configuration"
 mkdir -p "$DATA_DIR" "$SHARES_DIR"
 echo "    Data directory:  $DATA_DIR"
 echo "    Share directory: $SHARES_DIR"
@@ -221,19 +256,110 @@ services:
 EOF
 echo "    Configuration written: $COMPOSE_FILE"
 
-# --- 3. Pull the image and start the container ------------------------------
+# --- 3. Admin account --------------------------------------------------------
+echo
+echo "==> [3/5] Admin account"
+
+# Escapes a value for a single-quoted YAML scalar: the only character that
+# needs handling there is the single quote itself, which is doubled.
+yaml_single_quote() {
+  printf "'%s'" "$(printf '%s' "$1" | sed "s/'/''/g")"
+}
+
+# An account exists as soon as config.yaml has an 'accounts:' section. The
+# container writes config.yaml itself on its very first start; if it is not
+# there yet, this is a fresh installation.
+ADMIN_EXISTS=0
+if [[ -f "$CONFIG_FILE" ]] && grep -q '^accounts:' "$CONFIG_FILE"; then
+  ADMIN_EXISTS=1
+fi
+
+if [[ "$ADMIN_EXISTS" -eq 1 ]]; then
+  echo "    An account already exists in $CONFIG_FILE - leaving it alone."
+  echo "    To reset the password, use the Admin-panel, or stop the container and"
+  echo "    add a line 'create-admin: <new-password>' to that file."
+else
+  # Ask for the password unless it came from the command line. Hidden entry,
+  # twice, so a typo does not lock you out of the Admin-panel.
+  if [[ "$ADMIN_PASSWORD_GIVEN" -eq 0 ]]; then
+    if [[ "$ASSUME_YES" -eq 1 ]]; then
+      # Unattended run: generate one and print it at the end. 18 bytes of
+      # base64 without the characters that are awkward to retype.
+      ADMIN_PASSWORD="$(head -c 18 /dev/urandom | base64 | tr -d '/+=' | cut -c1-20)"
+      ADMIN_PASSWORD_GENERATED=1
+      echo "    No password given (--yes) - generating one."
+    else
+      echo "    HFS allows creating an account through the Admin-panel only from"
+      echo "    localhost, so the first account is seeded here."
+      echo
+      while true; do
+        read -r -s -p "    Password for the '$ADMIN_USER' account: " ADMIN_PASSWORD
+        echo
+        read -r -s -p "    Repeat the password: " ADMIN_PASSWORD_CONFIRM
+        echo
+        if [[ -z "$ADMIN_PASSWORD" ]]; then
+          echo "    The password must not be empty. Please try again."
+          continue
+        fi
+        if [[ "$ADMIN_PASSWORD" != "$ADMIN_PASSWORD_CONFIRM" ]]; then
+          echo "    The two entries do not match. Please try again."
+          continue
+        fi
+        break
+      done
+    fi
+  fi
+
+  if [[ -z "$ADMIN_PASSWORD" ]]; then
+    echo "ERROR: the admin password must not be empty."
+    exit 1
+  fi
+
+  # Write the 'create-admin' entry. HFS picks it up when it reads config.yaml,
+  # creates the account and removes the entry again.
+  #
+  # Two cases:
+  #   - No config.yaml yet: write it completely. That is exactly what the
+  #     container would generate on its own, only with our password instead of
+  #     the image default - and writing it first means the image does not
+  #     bootstrap a default account we would then have to work around. The vfs
+  #     entry mirrors what the image writes, so /shares stays available.
+  #   - config.yaml exists but has no account: append the entry. HFS reloads
+  #     the file as soon as it changes, so this works whether the container is
+  #     running or not.
+  if [[ ! -f "$CONFIG_FILE" ]]; then
+    mkdir -p "$DATA_DIR"
+    {
+      printf 'create-admin: %s\n' "$(yaml_single_quote "$ADMIN_PASSWORD")"
+      printf 'vfs:\n  source: /shares\n'
+    } > "$CONFIG_FILE"
+    echo "    Created $CONFIG_FILE with the admin account to be set up."
+  else
+    # Do not stack several pending entries on top of each other.
+    sed -i '/^create-admin:/d' "$CONFIG_FILE"
+    # If the file does not end in a newline, the new key would be glued onto
+    # the last line and break the YAML.
+    if [[ -s "$CONFIG_FILE" && -n "$(tail -c1 "$CONFIG_FILE")" ]]; then
+      printf '\n' >> "$CONFIG_FILE"
+    fi
+    printf 'create-admin: %s\n' "$(yaml_single_quote "$ADMIN_PASSWORD")" >> "$CONFIG_FILE"
+    echo "    Added the admin account to the existing $CONFIG_FILE."
+  fi
+fi
+
+# --- 4. Pull the image and start the container ------------------------------
 echo
 if [[ "$UPDATE_MODE" -eq 1 ]]; then
-  echo "==> [3/4] Pulling the image and recreating the container"
+  echo "==> [4/5] Pulling the image and recreating the container"
 else
-  echo "==> [3/4] Pulling the image and starting the container"
+  echo "==> [4/5] Pulling the image and starting the container"
 fi
 docker compose -f "$COMPOSE_FILE" pull
 docker compose -f "$COMPOSE_FILE" up -d
 
-# --- 4. Wait for the web interface ------------------------------------------
+# --- 5. Wait for the web interface and the account --------------------------
 echo
-echo "==> [4/4] Waiting for the web interface (port $HFS_PORT)"
+echo "==> [5/5] Waiting for the web interface (port $HFS_PORT)"
 
 # Ubuntu Server ships with ufw INACTIVE -> no ports blocked. If ufw is active,
 # open the configured port.
@@ -250,6 +376,25 @@ for _ in $(seq 1 30); do
   fi
   sleep 2
 done
+
+# Confirm that HFS really picked up the account. It removes the 'create-admin'
+# entry as soon as the account exists, so its disappearance - together with an
+# 'accounts:' section - is the proof. Without this check the script could
+# report success while leaving an unadministrable server behind.
+ADMIN_READY=0
+if [[ "$ADMIN_EXISTS" -eq 1 ]]; then
+  ADMIN_READY=1
+else
+  for _ in $(seq 1 30); do
+    if [[ -f "$CONFIG_FILE" ]] \
+       && ! grep -q '^create-admin:' "$CONFIG_FILE" \
+       && grep -q '^accounts:' "$CONFIG_FILE"; then
+      ADMIN_READY=1
+      break
+    fi
+    sleep 2
+  done
+fi
 
 IP=$(hostname -I 2>/dev/null | awk '{print $1}')
 
@@ -273,9 +418,23 @@ echo "------------------------------------------------------------"
 echo " Web interface:   http://${IP:-<SERVER-IP>}:$HFS_PORT"
 echo " Admin panel:     http://${IP:-<SERVER-IP>}:$HFS_PORT/~/admin"
 echo
-echo " IMPORTANT: the image creates a default account"
-echo "     user: admin    password: please-change"
-echo " Change this password IMMEDIATELY in the admin panel."
+if [[ "$ADMIN_EXISTS" -eq 1 ]]; then
+  echo " Account:         '$ADMIN_USER' (existing, password unchanged)"
+elif [[ "$ADMIN_READY" -eq 1 ]]; then
+  echo " Account:         '$ADMIN_USER'"
+  if [[ "$ADMIN_PASSWORD_GENERATED" -eq 1 ]]; then
+    echo " Password:        $ADMIN_PASSWORD"
+    echo "                  (generated - write it down, it is not shown again)"
+  else
+    echo " Password:        the one you entered"
+  fi
+else
+  echo " WARNING: the '$ADMIN_USER' account was not created within 60 seconds."
+  echo "          The entry 'create-admin' is still in $CONFIG_FILE."
+  echo "          Check whether the container is running:"
+  echo "            docker compose -f $COMPOSE_FILE logs -f"
+  echo "          HFS reloads the file by itself once it runs."
+fi
 echo "------------------------------------------------------------"
 echo " Files to share:  put them into $SHARES_DIR"
 echo "                  (further folders can be added in the admin panel)"
