@@ -97,12 +97,13 @@ signature verification beyond that, so:
 parties (Docker CE, the `rejetto/hfs` container image, the UniFi OS Server
 installer). Their security is the responsibility of those projects.
 
-`install-hfs.sh` asks for the password of the HFS `admin` account and seeds it
-through HFS's `create-admin` configuration entry, which HFS removes again once
-the account exists. The password is therefore in `/opt/hfs/data/config.yaml` in
-clear text only for the moment between writing it and HFS reading it. With
-`--yes` the script generates a random password and prints it once — there is no
-way to retrieve it afterwards, so write it down.
+`install-hfs.sh` asks for the password of the HFS `admin` account and writes it
+into the `accounts:` section of `/opt/hfs/data/config.yaml`. HFS replaces that
+plain `password` with a hashed `srp` as soon as it reads the file, so the
+clear-text password exists on disk only between writing it and HFS reading it —
+the script waits for the hash and reports if it does not appear. With `--yes` it
+generates a random password and prints it once; there is no way to retrieve it
+afterwards, so write it down.
 
 Note that HFS serves the Admin-panel without credentials to requests from
 localhost (`localhost_admin`, default `true`). Anyone with shell access to the

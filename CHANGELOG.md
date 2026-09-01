@@ -23,12 +23,18 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 - `install-hfs.sh` left behind a server that could not be administered
   remotely. HFS creates accounts through the Admin-panel only from localhost,
-  so on a headless server there was no way in. The script now asks for the
-  password of the `admin` account and seeds it through HFS's `create-admin`
-  configuration entry, which HFS consumes and removes again. It verifies that
-  the account really appeared instead of reporting success blindly, and
-  repairs an existing installation that has no account. `--admin-password`
-  sets it non-interactively; `--yes` generates a random one and prints it.
+  so on a headless server there was no way in, and the container image's own
+  bootstrap account never materialised. The script now asks for the password of
+  the `admin` account and writes it into the `accounts:` section of
+  `config.yaml`, where HFS replaces it with a hashed `srp` on read. It waits
+  for that hash instead of reporting success blindly, and repairs an existing
+  installation that has no account. `--admin-password` sets it
+  non-interactively; `--yes` generates a random one and prints it.
+
+  HFS's documented `create-admin:` shortcut is deliberately not used: the HFS
+  build inside the container image drops that key when it rewrites the
+  configuration and creates nothing — which is also the reason the image's own
+  bootstrap, writing exactly that key, leaves no usable login behind.
 - `--help` no longer requires root in `install-hfs.sh` and `system-update.sh` —
   the root check ran before the argument parsing.
 - Anchor links did not scroll on wiki pages. GitHub renders headings with

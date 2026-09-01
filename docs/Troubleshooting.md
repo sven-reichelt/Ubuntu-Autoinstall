@@ -174,30 +174,41 @@ A first start can take a moment while the image initialises `/opt/hfs/data`.
 
 HFS creates accounts through the Admin-panel only from localhost, and it lets
 the panel be opened without credentials from there — so over the network you get
-a login prompt with no account behind it. The script seeds the account through
-HFS's `create-admin` entry; if that did not work, the entry is still sitting in
-the configuration file:
+a login prompt with no account behind it. The script therefore writes the
+account into the configuration. Check what is in there:
 
 ```bash
-grep create-admin /opt/hfs/data/config.yaml
+sudo grep -A3 '^accounts:' /opt/hfs/data/config.yaml
 ```
 
-If it is still there, the container is not running or not reading the file:
+- **`srp:` under the account** — everything is in order, HFS has hashed the
+  password and the login works.
+- **`password:` under the account** — HFS has not read the file yet. Make sure
+  the container runs; it picks the file up by itself.
+- **no `accounts:` section at all** — the account never arrived. Run
+  `sudo ~/scripts/install-hfs.sh` again; it appends the section to the existing
+  configuration.
 
 ```bash
 docker compose -f /opt/hfs/docker-compose.yml ps
 docker compose -f /opt/hfs/docker-compose.yml logs -f
 ```
 
-HFS reloads `config.yaml` as soon as it changes, so once the container runs the
-account appears and the entry disappears by itself.
+> If you added `create-admin: <password>` by hand following HFS's own
+> documentation and it silently vanished from the file without an account
+> appearing: that is expected with the container image. Its HFS build drops the
+> key when it rewrites the configuration. Use the `accounts:` section instead.
 
 ### install-hfs.sh: I forgot the admin password
 
-Add the entry again and save — no restart needed:
+Replace the `srp:` line of the account with a plain `password:` and save — HFS
+hashes it again while running, no restart needed:
 
-```bash
-echo "create-admin: 'new-password'" | sudo tee -a /opt/hfs/data/config.yaml
+```yaml
+accounts:
+  admin:
+    password: 'new-password'
+    admin: true
 ```
 
 Quote the password in single quotes, and double any single quote inside it

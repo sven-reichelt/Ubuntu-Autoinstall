@@ -199,33 +199,42 @@ and it lets the Admin-panel be opened without credentials from localhost too
 where you are not: you reach the panel over the network, it asks for a login,
 and there is no account to log in with.
 
-The way out is a special configuration entry that HFS understands:
+The way out is to put the account into `/opt/hfs/data/config.yaml` directly:
 
 ```yaml
-create-admin: <password>
+accounts:
+  admin:
+    password: 'your-password'
+    admin: true
 ```
 
-HFS reloads `config.yaml` as soon as it changes, creates the account, and
-**removes that entry again** — so the password does not stay on disk in clear
-text. The script does this for you:
+HFS reloads `config.yaml` as soon as it changes and replaces the plain
+`password` with the hashed `srp`, so the clear-text password only exists on disk
+between writing the file and HFS reading it. The script does this for you:
 
-- On a fresh installation it writes `/opt/hfs/data/config.yaml` before the first
-  start, with your password and the `/shares` entry the image would create
-  itself.
-- If a `config.yaml` exists but holds no account, it appends the entry — that is
-  the case if a container was started before without an account being set up.
+- On a fresh installation it writes `config.yaml` before the first start, with
+  your password and the `/shares` entry the image would create itself.
+- If a `config.yaml` exists but holds no account, it appends the section — that
+  repairs an installation that came up without a login.
 - If an account already exists, it is left untouched.
 
-Afterwards the script waits until the entry has disappeared and an `accounts:`
-section is there, and reports the result. If that does not happen within 60
-seconds it says so instead of claiming success on a server you cannot
-administer.
+Afterwards the script waits for `srp:` to appear and reports the result. If that
+does not happen within 60 seconds it says so instead of claiming success on a
+server you cannot administer.
 
-To reset a forgotten password, add the line yourself and save — HFS picks it up
-while running:
+> **Not via `create-admin:`.** HFS documents a shortcut entry
+> `create-admin: <password>` that creates the account and removes itself again.
+> The HFS build inside the container image **drops that key** when it rewrites
+> the configuration and creates nothing — which is also why the image's own
+> bootstrap, which writes exactly that key with the password `please-change`,
+> never produces a usable login. The `accounts:` section is HFS's primary
+> mechanism and works.
+
+To reset a forgotten password, set a plain `password:` on the account and save.
+HFS picks it up while running and hashes it again:
 
 ```bash
-echo "create-admin: 'new-password'" | sudo tee -a /opt/hfs/data/config.yaml
+sudo nano /opt/hfs/data/config.yaml     # replace the 'srp:' line with 'password: new-one'
 ```
 
 Everyday commands:

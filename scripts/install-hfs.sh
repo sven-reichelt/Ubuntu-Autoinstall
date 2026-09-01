@@ -18,16 +18,23 @@
 #
 # ADMIN ACCOUNT: HFS lets you create an account through the Admin-panel only
 # from localhost. On a headless server that is exactly where you are not, so
-# the account has to be seeded through the configuration file. HFS has a
-# special config entry for it:
+# the account has to be seeded through the configuration file:
 #
-#   create-admin: <password>
+#   accounts:
+#     admin:
+#       password: <password>
+#       admin: true
 #
-# HFS reloads config.yaml as soon as it changes, creates the account and then
-# removes that entry again - so the password does not stay on disk in clear
-# text. This script writes the entry, waits until HFS has consumed it and
-# reports the result. Without it you would end up with a running server you
-# cannot administer remotely.
+# HFS reloads config.yaml as soon as it changes and replaces the plain
+# 'password' with the hashed 'srp', so the clear-text password only exists on
+# disk between writing the file and HFS reading it. This script writes the
+# section, waits for the hash to appear and reports the result. Without it you
+# would end up with a running server you cannot administer remotely.
+#
+# Deliberately NOT via the documented 'create-admin: <password>' shortcut: the
+# HFS build inside the container image drops that key when it rewrites the
+# configuration and creates nothing. That is also why the image's own bootstrap
+# (which writes exactly that key) never produces a usable login.
 #
 # UPDATE: simply run the script again. An existing installation is detected,
 # the image is pulled and the container recreated - the configuration under
@@ -276,8 +283,8 @@ fi
 
 if [[ "$ADMIN_EXISTS" -eq 1 ]]; then
   echo "    An account already exists in $CONFIG_FILE - leaving it alone."
-  echo "    To reset the password, use the Admin-panel, or stop the container and"
-  echo "    add a line 'create-admin: <new-password>' to that file."
+  echo "    To reset the password, use the Admin-panel, or set a plain"
+  echo "    'password:' on the account in that file - HFS hashes it on read."
 else
   # Ask for the password unless it came from the command line. Hidden entry,
   # twice, so a typo does not lock you out of the Admin-panel.
@@ -315,35 +322,47 @@ else
     exit 1
   fi
 
-  # Write the 'create-admin' entry. HFS picks it up when it reads config.yaml,
-  # creates the account and removes the entry again.
+  # Write the account into the 'accounts:' section of config.yaml. HFS replaces
+  # the plain 'password' with the hashed 'srp' as soon as it reads the file.
+  #
+  # NOT via the 'create-admin:' shortcut: the HFS build inside the container
+  # image silently drops that key when it rewrites the configuration, leaving
+  # no account behind - which is also why the image's own bootstrap default
+  # never produces a usable login. The 'accounts:' section is HFS's primary,
+  # long-standing mechanism and is honoured.
   #
   # Two cases:
-  #   - No config.yaml yet: write it completely. That is exactly what the
-  #     container would generate on its own, only with our password instead of
-  #     the image default - and writing it first means the image does not
-  #     bootstrap a default account we would then have to work around. The vfs
-  #     entry mirrors what the image writes, so /shares stays available.
-  #   - config.yaml exists but has no account: append the entry. HFS reloads
+  #   - No config.yaml yet: write it completely. The vfs entry mirrors what the
+  #     image would generate itself, so /shares stays available, and writing it
+  #     before the first start keeps the image from bootstrapping a default.
+  #   - config.yaml exists but has no account: append the section. HFS reloads
   #     the file as soon as it changes, so this works whether the container is
   #     running or not.
+  admin_account_block() {
+    printf 'accounts:\n'
+    printf '  %s:\n' "$ADMIN_USER"
+    printf '    password: %s\n' "$(yaml_single_quote "$ADMIN_PASSWORD")"
+    printf '    admin: true\n'
+  }
+
   if [[ ! -f "$CONFIG_FILE" ]]; then
     mkdir -p "$DATA_DIR"
     {
-      printf 'create-admin: %s\n' "$(yaml_single_quote "$ADMIN_PASSWORD")"
+      admin_account_block
       printf 'vfs:\n  source: /shares\n'
     } > "$CONFIG_FILE"
-    echo "    Created $CONFIG_FILE with the admin account to be set up."
+    echo "    Created $CONFIG_FILE with the '$ADMIN_USER' account."
   else
-    # Do not stack several pending entries on top of each other.
+    # Clean up a leftover entry from an earlier version of this script, so it
+    # cannot confuse the check further down.
     sed -i '/^create-admin:/d' "$CONFIG_FILE"
     # If the file does not end in a newline, the new key would be glued onto
     # the last line and break the YAML.
     if [[ -s "$CONFIG_FILE" && -n "$(tail -c1 "$CONFIG_FILE")" ]]; then
       printf '\n' >> "$CONFIG_FILE"
     fi
-    printf 'create-admin: %s\n' "$(yaml_single_quote "$ADMIN_PASSWORD")" >> "$CONFIG_FILE"
-    echo "    Added the admin account to the existing $CONFIG_FILE."
+    admin_account_block >> "$CONFIG_FILE"
+    echo "    Added the '$ADMIN_USER' account to the existing $CONFIG_FILE."
   fi
 fi
 
@@ -377,23 +396,30 @@ for _ in $(seq 1 30); do
   sleep 2
 done
 
-# Confirm that HFS really picked up the account. It removes the 'create-admin'
-# entry as soon as the account exists, so its disappearance - together with an
-# 'accounts:' section - is the proof. Without this check the script could
-# report success while leaving an unadministrable server behind.
+# Confirm that HFS really picked up the account. It replaces the plain
+# 'password' with the hashed 'srp' as soon as it reads the configuration, so
+# an 'srp:' in the file is the proof that the account is live. Without this
+# check the script could report success while leaving behind a server nobody
+# can administer.
 ADMIN_READY=0
 if [[ "$ADMIN_EXISTS" -eq 1 ]]; then
   ADMIN_READY=1
 else
   for _ in $(seq 1 30); do
-    if [[ -f "$CONFIG_FILE" ]] \
-       && ! grep -q '^create-admin:' "$CONFIG_FILE" \
-       && grep -q '^accounts:' "$CONFIG_FILE"; then
+    if [[ -f "$CONFIG_FILE" ]] && grep -q 'srp:' "$CONFIG_FILE"; then
       ADMIN_READY=1
       break
     fi
     sleep 2
   done
+fi
+
+# The account is already usable once HFS has read the file, even before it
+# writes the hash back. Distinguish "not hashed yet" from "not there at all"
+# instead of reporting a single vague failure.
+ADMIN_CONFIGURED=0
+if [[ -f "$CONFIG_FILE" ]] && grep -q '^accounts:' "$CONFIG_FILE"; then
+  ADMIN_CONFIGURED=1
 fi
 
 IP=$(hostname -I 2>/dev/null | awk '{print $1}')
@@ -428,12 +454,23 @@ elif [[ "$ADMIN_READY" -eq 1 ]]; then
   else
     echo " Password:        the one you entered"
   fi
+elif [[ "$ADMIN_CONFIGURED" -eq 1 ]]; then
+  echo " Account:         '$ADMIN_USER'"
+  if [[ "$ADMIN_PASSWORD_GENERATED" -eq 1 ]]; then
+    echo " Password:        $ADMIN_PASSWORD"
+    echo "                  (generated - write it down, it is not shown again)"
+  fi
+  echo
+  echo " NOTE: the account is in $CONFIG_FILE, but HFS has not replaced the"
+  echo "       plain password with its hash within 60 seconds. Usually it just"
+  echo "       has not read the file yet - the login should work anyway. Check:"
+  echo "         grep -A3 '^accounts:' $CONFIG_FILE"
+  echo "       Once 'srp:' shows up there, HFS has taken it over."
 else
-  echo " WARNING: the '$ADMIN_USER' account was not created within 60 seconds."
-  echo "          The entry 'create-admin' is still in $CONFIG_FILE."
-  echo "          Check whether the container is running:"
+  echo " WARNING: the '$ADMIN_USER' account is not in $CONFIG_FILE."
+  echo "          Something rewrote the file. Check the container:"
   echo "            docker compose -f $COMPOSE_FILE logs -f"
-  echo "          HFS reloads the file by itself once it runs."
+  echo "          Then run this script again."
 fi
 echo "------------------------------------------------------------"
 echo " Files to share:  put them into $SHARES_DIR"
