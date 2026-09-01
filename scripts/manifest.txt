@@ -1,0 +1,20 @@
+# =============================================================================
+# manifest.txt - list of scripts offered by get-scripts.sh
+# -----------------------------------------------------------------------------
+# Format, one script per line:
+#   <file name>.sh|<short description shown in the menu>
+#
+# Lines starting with '#' and empty lines are ignored. The loader itself
+# (get-scripts.sh) must NOT be listed here.
+#
+# To add a new script:
+#   1. Put the script into scripts/
+#   2. Add one line here
+#   3. Commit - the script is available on every installed system immediately,
+#      no seed ISO rebuild required.
+# =============================================================================
+change-password.sh|Change the password of a local user account
+configure-network.sh|Switch a network interface between DHCP and a static IP
+system-update.sh|Update all packages (apt update / full-upgrade / autoremove)
+install-hfs.sh|Install or update HFS (HTTP File Server) in Docker
+install-unifi-os-server.sh|Install or update UniFi OS Server

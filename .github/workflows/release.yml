@@ -1,0 +1,100 @@
+name: Release
+
+# Builds the seed ISO and publishes it as a GitHub release asset.
+# Triggered by pushing a version tag, for example:
+#   git tag -a v1.0.0 -m "Release 1.0.0" && git push origin v1.0.0
+#
+# Can also be started manually (workflow_dispatch) with an explicit tag name -
+# useful to rebuild the asset of an existing release.
+on:
+  push:
+    tags: [ 'v*' ]
+  workflow_dispatch:
+    inputs:
+      tag:
+        description: 'Tag to build the release for (e.g. v1.0.0)'
+        required: true
+        type: string
+
+permissions:
+  contents: write
+
+jobs:
+  build-and-release:
+    name: Build seed.iso and publish the release
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ inputs.tag || github.ref }}
+
+      - name: Determine the version
+        id: version
+        run: |
+          TAG="${{ inputs.tag || github.ref_name }}"
+          echo "tag=$TAG"            >> "$GITHUB_OUTPUT"
+          echo "version=${TAG#v}"    >> "$GITHUB_OUTPUT"
+
+      - name: Provide PyYAML
+        run: python3 -m pip install --quiet --break-system-packages pyyaml
+
+      - name: Install ShellCheck and xorriso
+        run: sudo apt-get update -qq && sudo apt-get install -y shellcheck xorriso
+
+      # A broken release helps nobody - run the same checks as the CI first.
+      - name: Run validation
+        run: |
+          chmod +x validate.sh
+          ./validate.sh
+
+      - name: Build the seed ISO
+        run: |
+          chmod +x autoinstall/build-seed-iso.sh
+          ./autoinstall/build-seed-iso.sh
+          ls -lh autoinstall/seed.iso
+
+      # The ISO carries the default password hash, so a checksum lets users
+      # verify that the download is the untouched build from this workflow.
+      - name: Create the checksum
+        run: |
+          cd autoinstall
+          sha256sum seed.iso > seed.iso.sha256
+          cat seed.iso.sha256
+
+      # Release notes: take the section of this version from CHANGELOG.md.
+      # Everything from the version heading up to (excluding) the next one.
+      - name: Extract the release notes
+        id: notes
+        run: |
+          VERSION="${{ steps.version.outputs.version }}"
+          {
+            echo 'body<<RELEASE_NOTES_EOF'
+            awk -v ver="$VERSION" '
+              /^## \[/ {
+                if (found) exit
+                if (index($0, "[" ver "]") > 0) { found = 1; next }
+              }
+              # Stop before the link definitions at the bottom of the file
+              found && /^\[[^]]+\]:[ \t]/ { exit }
+              found { print }
+            ' CHANGELOG.md
+            echo
+            echo '---'
+            echo
+            echo '**Installation:** download `seed.iso`, attach it to the VM as a second CD drive next to the Ubuntu Server ISO and boot. See the [README](../../blob/main/README.md) and [docs/INSTALLATION.md](../../blob/main/docs/INSTALLATION.md).'
+            echo
+            echo 'Default login after the installation: `ubuntu-admin` / `ubuntu` - change it immediately with `sudo ~/get-scripts.sh change-password.sh`.'
+            echo 'RELEASE_NOTES_EOF'
+          } >> "$GITHUB_OUTPUT"
+
+      - name: Publish the release
+        uses: softprops/action-gh-release@v2
+        with:
+          tag_name: ${{ steps.version.outputs.tag }}
+          name: ${{ steps.version.outputs.tag }}
+          body: ${{ steps.notes.outputs.body }}
+          draft: false
+          prerelease: ${{ contains(steps.version.outputs.tag, '-rc') || contains(steps.version.outputs.tag, '-beta') }}
+          files: |
+            autoinstall/seed.iso
+            autoinstall/seed.iso.sha256

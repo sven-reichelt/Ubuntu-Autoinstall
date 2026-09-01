@@ -1,0 +1,180 @@
+#cloud-config
+# =============================================================================
+# Ubuntu Server 24.04 LTS / 26.04 LTS - autoinstall (subiquity)
+# -----------------------------------------------------------------------------
+# This file drives the completely unattended installation. Adjust it BEFORE
+# building the seed ISO:
+#   - identity.hostname / realname / username / password (hash!)
+#   - ssh.authorized-keys (optional, recommended)
+#   - network (default: DHCP; static IP see the commented block below)
+#
+# Regenerate the password hash (the shipped one is for the password "ubuntu"):
+#   openssl passwd -6 'YOUR-PASSWORD'
+# Paste the complete $6$... string into identity.password.
+#
+# After the installation the helper script get-scripts.sh sits in the home
+# directory of the user and downloads the maintenance/installation scripts
+# from GitHub on demand - nothing else is pre-installed.
+# =============================================================================
+autoinstall:
+  version: 1
+
+  # --- Language / keyboard / time ------------------------------------------
+  locale: de_DE.UTF-8
+  keyboard:
+    layout: de
+  timezone: Europe/Berlin
+
+  # --- User / hostname ------------------------------------------------------
+  identity:
+    hostname: ubuntu
+    realname: Ubuntu Server
+    username: ubuntu-admin
+    # Default password is "ubuntu" -> CHANGE IT (see the header of this file
+    # or run get-scripts.sh and pick change-password.sh).
+    password: "$6$5b52d01a7f004b26$iNdC31e912cQq44sfhDOFZJYu0q9Rhb35Yuy8o3vStW9j8M2bVJg5h3WuT4deU3Tm/mNyxoSfrfsLETEJN/.80"
+
+  # --- SSH ------------------------------------------------------------------
+  ssh:
+    install-server: true
+    allow-pw: true
+    # Recommended: add your own public key and set allow-pw to false.
+    # authorized-keys:
+    #   - "ssh-ed25519 AAAA... your-key"
+
+  # --- Network --------------------------------------------------------------
+  # Default: DHCP on every ethernet interface.
+  # "e*" matches VMware (ens*/enp*) AND Hyper-V (eth0) alike.
+  network:
+    version: 2
+    ethernets:
+      anyeth:
+        match:
+          name: "e*"
+        dhcp4: true
+    # ---- Static IP (alternative) - comment out the block above and use:
+    #   ens160:
+    #     dhcp4: false
+    #     addresses: [192.168.1.50/24]
+    #     routes:
+    #       - to: default
+    #         via: 192.168.1.1
+    #     nameservers:
+    #       addresses: [192.168.1.1, 1.1.1.1]
+
+  # --- Disk -----------------------------------------------------------------
+  # "direct" = whole disk, one large root partition (simple and robust).
+  # For LVM use instead:  layout: { name: lvm }
+  storage:
+    layout:
+      name: direct
+
+  # --- Packages -------------------------------------------------------------
+  # Deliberately minimal: only what get-scripts.sh needs plus the VMware guest
+  # tools. Everything else is installed by the scripts fetched from GitHub.
+  # Hyper-V: 'open-vm-tools' can be removed (integration services are already
+  # part of the kernel). Leaving it installed does no harm.
+  packages:
+    - curl
+    - ca-certificates
+    - open-vm-tools
+
+  # Pull security updates during the installation
+  updates: security
+
+  # Reboot automatically once the installation has finished
+  shutdown: reboot
+
+  # --- Post-install work ----------------------------------------------------
+  late-commands:
+    # Enable the VMware guest tools (harmless / ignored on Hyper-V)
+    - curtin in-target --target=/target -- systemctl enable open-vm-tools.service || true
+
+    # Copy the script loader into the home directory of the user. The loader is
+    # the only script shipped on the seed ISO - everything else is pulled from
+    # GitHub afterwards.
+    #
+    # late-commands run in the live installer environment (Casper), where
+    # /cdrom points at the Ubuntu boot medium, NOT at the seed ISO. The seed
+    # ISO is therefore located through its volume label (CIDATA) and mounted.
+    #
+    # TARGET_USER is the only place in this block where the user name appears -
+    # it must match identity.username above.
+    - |
+      sh -c '
+        set -e
+        TARGET_USER="ubuntu-admin"
+        NAME="get-scripts.sh"
+        SRC=""
+        if [ -f "/cdrom/nocloud/$NAME" ]; then
+          SRC="/cdrom/nocloud/$NAME"
+        else
+          DEV="$(blkid -L CIDATA 2>/dev/null || true)"
+          if [ -n "$DEV" ]; then
+            mkdir -p /mnt/cidata
+            mountpoint -q /mnt/cidata || mount -o ro "$DEV" /mnt/cidata
+            if [ -f "/mnt/cidata/$NAME" ]; then
+              SRC="/mnt/cidata/$NAME"
+            fi
+          fi
+        fi
+        if [ -n "$SRC" ]; then
+          cp "$SRC" "/target/home/$TARGET_USER/"
+        fi
+        if mountpoint -q /mnt/cidata 2>/dev/null; then
+          umount /mnt/cidata
+        fi
+      ' || true
+    # Set ownership and make it executable (chroot needed so the user name resolves)
+    - |
+      curtin in-target --target=/target -- sh -c '
+        TARGET_USER="ubuntu-admin"
+        NAME="get-scripts.sh"
+        chown "$TARGET_USER:$TARGET_USER" "/home/$TARGET_USER/$NAME" 2>/dev/null || true
+        chmod +x "/home/$TARGET_USER/$NAME" 2>/dev/null || true
+      ' || true
+
+    # Tidy up the MOTD: turn off the stock notices (help text, package news,
+    # ESM/Ubuntu Pro advertising) for good and replace them with our own hint.
+    - curtin in-target --target=/target -- chmod -x /etc/update-motd.d/10-help-text || true
+    - curtin in-target --target=/target -- chmod -x /etc/update-motd.d/50-motd-news || true
+    # Additionally disable 50-motd-news through its official switch file so that
+    # a package update of update-motd.d cannot re-enable it.
+    - curtin in-target --target=/target -- sed -i 's/^ENABLED=.*/ENABLED=0/' /etc/default/motd-news || true
+    # 90-updates-available shows available updates including ESM content;
+    # 91-contract-ua-esm-status is generated by the Ubuntu Pro client
+    # (ubuntu-advantage-tools) from cached messages - disable the source as well
+    # so it stays gone after the client refreshes.
+    - curtin in-target --target=/target -- chmod -x /etc/update-motd.d/90-updates-available || true
+    - curtin in-target --target=/target -- chmod -x /etc/update-motd.d/91-contract-ua-esm-status || true
+    - curtin in-target --target=/target -- pro config set apt_news=false || true
+    - |
+      cat > /target/etc/update-motd.d/99-custom <<'MOTD'
+      #!/usr/bin/env bash
+      set -euo pipefail
+
+      # Custom MOTD: points at the script loader instead of the stock notices.
+      cat <<'EOF'
+
+
+
+      =============== Ubuntu-Autoinstall - next steps ===============
+
+      This system was installed unattended. No maintenance or setup
+      scripts are installed yet - fetch them from GitHub when needed:
+
+        sudo ~/get-scripts.sh            browse and run available scripts
+        sudo ~/get-scripts.sh --list     just list what is available
+        sudo ~/get-scripts.sh --all      download everything to ~/scripts
+
+      Recommended first step: change the default password
+        sudo ~/get-scripts.sh change-password.sh
+
+      Project: https://github.com/sven-reichelt/Ubuntu-Autoinstall
+
+
+
+      EOF
+      MOTD
+    - curtin in-target --target=/target -- chown root:root /etc/update-motd.d/99-custom || true
+    - curtin in-target --target=/target -- chmod +x /etc/update-motd.d/99-custom || true

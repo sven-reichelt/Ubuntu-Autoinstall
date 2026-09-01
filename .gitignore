@@ -1,0 +1,32 @@
+# Built ISO images (never commit)
+*.iso
+autoinstall/seed.iso
+ubuntu-*.iso
+
+# Virtual disks / VM artefacts
+*.vhdx
+*.vhd
+*.vmdk
+
+# Local or real secrets (never commit)
+*.key
+*.pem
+id_rsa*
+id_ed25519*
+user-data.local
+*.local
+
+# Temporary files / build leftovers
+tmp/
+*.tmp
+*.log
+
+# OS clutter
+.DS_Store
+Thumbs.db
+desktop.ini
+
+# Editor / IDE directories
+.vscode/
+.idea/
+*.swp

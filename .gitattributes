@@ -1,0 +1,15 @@
+# Keep line endings consistent - important so that shell scripts authored on
+# Windows are not committed with CRLF (they would fail to run on Ubuntu).
+* text=auto eol=lf
+
+# Shell scripts and cloud-init files are always LF
+*.sh          text eol=lf
+user-data     text eol=lf
+meta-data     text eol=lf
+manifest.txt  text eol=lf
+
+# Binary files must not be touched
+*.iso   binary
+*.vhdx  binary
+*.vhd   binary
+*.vmdk  binary
