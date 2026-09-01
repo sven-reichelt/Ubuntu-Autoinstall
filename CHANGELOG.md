@@ -7,6 +7,29 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Added
+
+- `.github/workflows/wiki.yml` and `.github/scripts/build-wiki.sh` — the
+  documentation in `docs/` is rendered into wiki pages and pushed to the
+  GitHub wiki on every push to `main`. `docs/` stays the single source of
+  truth; the wiki is a mirror.
+- Documentation checks in `validate.sh`: the wiki pages must render (which also
+  verifies that `docs/` and the page order in `build-wiki.sh` agree in both
+  directions), and every relative link in `README.md`, `SECURITY.md`,
+  `CHANGELOG.md` and `docs/*.md` must resolve.
+- Release and pre-release badges in the README.
+
+### Changed
+
+- `README.md` is now a landing page (111 instead of 452 lines): what it is, how
+  it works, quick start, documentation index, script overview.
+- The documentation was split into five pages under `docs/` —
+  `Installation.md` (renamed from `INSTALLATION.md`), `Scripts.md`,
+  `Configuration.md`, `Troubleshooting.md` and `Development.md`, with
+  `docs/README.md` as the index and wiki home. The loader reference, script
+  details, `user-data` customisation and the release process moved out of the
+  README into those pages.
+
 ## [1.0.0] - 2026-09-01
 
 ### Added

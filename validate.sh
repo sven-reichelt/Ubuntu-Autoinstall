@@ -193,6 +193,63 @@ else
   fi
 fi
 
+# --- 5. Documentation -------------------------------------------------------
+# The wiki is generated from docs/, so a broken relative link or a page that
+# build-wiki.sh does not know about would only surface after the push. Catch
+# both here.
+note "Checking the documentation"
+
+# 5a. Rendering the wiki also verifies that docs/ and the page order in
+#     build-wiki.sh agree in both directions.
+BUILD_WIKI=".github/scripts/build-wiki.sh"
+if [[ ! -f "$BUILD_WIKI" ]]; then
+  echo "  FAIL: $BUILD_WIKI is missing"; fail=1
+else
+  wiki_tmp="$(mktemp -d)"
+  if bash "$BUILD_WIKI" "$wiki_tmp" >/dev/null; then
+    echo "  OK   wiki pages render ($(find "$wiki_tmp" -maxdepth 1 -name '*.md' | wc -l) pages)"
+  else
+    echo "  FAIL: $BUILD_WIKI reported a problem (run it directly to see it)"; fail=1
+  fi
+  rm -rf "$wiki_tmp"
+fi
+
+# 5b. Every relative link in README.md and docs/*.md must resolve to a file
+#     that exists. External links (http/https/mailto) and pure anchors are
+#     skipped - only local targets can be checked here.
+check_links() {
+  local file="$1" dir target resolved
+  dir="$(dirname "$file")"
+  while IFS= read -r target; do
+    # Strip an anchor and any link title
+    target="${target%%#*}"
+    target="${target%% *}"
+    [[ -z "$target" ]] && continue
+    case "$target" in
+      http://*|https://*|mailto:*|\<*) continue ;;
+    esac
+    resolved="$dir/$target"
+    if [[ ! -e "$resolved" ]]; then
+      echo "  FAIL: $file links to '$target', which does not exist"
+      return 1
+    fi
+  done < <(grep -o '](\([^)]*\))' "$file" | sed 's/^](//; s/)$//')
+  return 0
+}
+
+link_fail=0
+shopt -s nullglob
+for f in README.md SECURITY.md CHANGELOG.md docs/*.md; do
+  [[ -f "$f" ]] || continue
+  if check_links "$f"; then
+    echo "  OK   links in $f"
+  else
+    link_fail=1
+  fi
+done
+shopt -u nullglob
+[[ "$link_fail" -eq 0 ]] || fail=1
+
 # --- Result -----------------------------------------------------------------
 echo
 if [[ "$fail" -ne 0 ]]; then

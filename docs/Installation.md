@@ -1,9 +1,11 @@
-# Installation guide
+# Installation
 
 Step-by-step setup of the virtual machine for **VMware ESXi** and
 **Microsoft Hyper-V**, from the two ISO files to the first login.
 
-For the short version see the [README](../README.md#quick-start).
+For the short version see the
+[repository README](../README.md#quick-start). If something goes wrong, see
+[Troubleshooting](Troubleshooting.md).
 
 ---
 
@@ -17,7 +19,6 @@ For the short version see the [README](../README.md#quick-start).
 - [Part 5 – Start the installation](#part-5--start-the-installation)
 - [Part 6 – First login](#part-6--first-login)
 - [Part 7 – Fetch and run scripts](#part-7--fetch-and-run-scripts)
-- [Troubleshooting](#troubleshooting)
 
 ---
 
@@ -29,26 +30,18 @@ The VM boots from the **Ubuntu Server ISO**. A **second CD drive** holds
 NoCloud datasource, reads the answers from it and installs without asking
 anything.
 
-```
-   +-------------------------+
-   |   Virtual machine       |
-   |                         |
-   |  CD 1: ubuntu-XX.XX.iso |  <- boot medium
-   |  CD 2: seed.iso (CIDATA)|  <- user-data + meta-data + get-scripts.sh
-   |  Disk: 32 GB            |
-   +-------------------------+
-              |
-              v
-   unattended installation, reboot
-              |
-              v
-   ubuntu-admin@ubuntu:~$ ls
-   get-scripts.sh
-```
-
 The Ubuntu ISO itself is **not** modified. That keeps the setup simple and lets
 you use any 24.04.x or 26.04.x image — but it means one small keystroke is
 needed at the boot menu, see [Part 5](#part-5--start-the-installation).
+
+**Recommended VM sizing**
+
+| | Minimum | Recommended | Note |
+| --- | --- | --- | --- |
+| vCPU | 2 | 2–4 | |
+| RAM | 2 GB | 4 GB | static memory on Hyper-V |
+| Disk | 20 GB | 32 GB+ | UniFi OS Server needs ~2 GB free just for the download |
+| Firmware | UEFI | UEFI | Hyper-V: Generation 2 with Secure Boot **off** |
 
 ---
 
@@ -99,9 +92,8 @@ Requires `xorriso` (`sudo apt-get install -y xorriso`), or `genisoimage`,
 
 ## Part 2 – Adjust the configuration (optional)
 
-Skip this if the defaults are fine. Everything lives in
-[`autoinstall/user-data`](../autoinstall/user-data) and must be changed
-**before** building the seed ISO (Option B above).
+Skip this if the defaults are fine — you can change everything after the
+installation as well.
 
 The defaults:
 
@@ -116,32 +108,13 @@ The defaults:
 | Disk | whole disk, one root partition |
 | SSH | enabled, password login allowed |
 
-Most common changes:
+If you want different values they have to go into
+[`autoinstall/user-data`](../autoinstall/user-data) **before** building the seed
+ISO (Option B above) — a downloaded release ISO always carries the defaults.
 
-```bash
-# Generate your own password hash and paste it into identity.password
-openssl passwd -6 'YOUR-PASSWORD'
-```
-
-```yaml
-# English keyboard and locale instead of German
-locale: en_US.UTF-8
-keyboard:
-  layout: us
-timezone: Europe/London
-```
-
-```yaml
-# SSH key instead of a password (recommended)
-ssh:
-  install-server: true
-  allow-pw: false
-  authorized-keys:
-    - "ssh-ed25519 AAAA... your-key"
-```
-
-A static IP can be set here too (see the commented block under `network:`), but
-it is usually easier to run `configure-network.sh` after the installation.
+The full list of what can be changed, including your own password hash, an SSH
+key, a different keyboard layout and a static IP at install time, is on the
+[Configuration](Configuration.md) page.
 
 After editing, rebuild the seed ISO and check the result:
 
@@ -317,7 +290,7 @@ back.
 sudo ~/get-scripts.sh change-password.sh
 ```
 
-The password `ubuntu` is public knowledge — it is in this repository and in
+The password `ubuntu` is public knowledge — it is in the repository and in
 every `seed.iso`.
 
 ### 7.2 Set a static IP (optional)
@@ -352,121 +325,5 @@ For UniFi OS Server, first copy the Linux (x64) download link from
 sudo ~/get-scripts.sh install-unifi-os-server.sh "https://fw-download.ubnt.com/data/unifi-os-server/...-x64"
 ```
 
-See the [README](../README.md#available-scripts) for what each script does.
-
----
-
-## Troubleshooting
-
-<details>
-<summary><strong>The installer asks for a language / keyboard layout — nothing is automated</strong></summary>
-
-The seed data was not found. Check:
-
-- Is `seed.iso` attached as a **second** CD drive and **connected**? On ESXi
-  the *Connect at power on* checkbox is the usual culprit; on Hyper-V the DVD
-  drive must be added to the SCSI controller.
-- Was the ISO built with the volume label `CIDATA`? `build-seed-iso.sh` sets
-  it; a manually built ISO with a different label will not be recognised.
-- Did you take Way 1 or Way 2 in [Part 5](#part-5--start-the-installation)?
-  Without the `autoinstall` parameter or a `yes` at the prompt, the installer
-  runs interactively.
-</details>
-
-<details>
-<summary><strong>The VM does not boot from the CD / goes straight to the EFI shell</strong></summary>
-
-- Check the boot order: the DVD drive with the Ubuntu ISO must be first.
-- **Hyper-V:** Secure Boot must be **off** (Settings → Security).
-- **ESXi:** firmware should be UEFI; make sure the ISO is actually attached and
-  not just selected.
-</details>
-
-<details>
-<summary><strong>"Continue with autoinstall?" appears every time</strong></summary>
-
-That is expected when the Ubuntu ISO is used unmodified — see
-[Part 5](#part-5--start-the-installation). Either answer `yes` or add the
-`autoinstall` kernel parameter in GRUB. Remastering the Ubuntu ISO to avoid
-this is deliberately out of scope for this project.
-</details>
-
-<details>
-<summary><strong>After the reboot the installer starts again</strong></summary>
-
-The VM booted from the CD again. Disconnect both CD drives (ESXi: uncheck
-*Connected*; Hyper-V: set the DVD drives to *None*) or move the hard disk to
-the top of the boot order, then reset the VM.
-</details>
-
-<details>
-<summary><strong>No IP address / no network</strong></summary>
-
-- Is the VM's network adapter connected to a working switch or port group?
-- On Hyper-V an **Internal** or **Private** switch has no DHCP server — use an
-  **External** switch or configure a static IP with `configure-network.sh`.
-- Check on the VM console:
-
-  ```bash
-  ip -4 addr
-  ip route
-  ```
-</details>
-
-<details>
-<summary><strong>get-scripts.sh: "Could not reach GitHub"</strong></summary>
-
-The system has no working internet connection or DNS. Test it:
-
-```bash
-ping -c3 1.1.1.1                          # is there any connectivity?
-getent hosts raw.githubusercontent.com    # does DNS resolve?
-curl -I https://raw.githubusercontent.com # is HTTPS reachable?
-```
-
-Fix the network first (`configure-network.sh` or your firewall), then run the
-loader again.
-</details>
-
-<details>
-<summary><strong>get-scripts.sh is missing from the home directory</strong></summary>
-
-The late-command could not copy it. This happens if the seed ISO was built
-without the loader, or if `identity.username` and `TARGET_USER` in
-`user-data` do not match. Rebuild the seed ISO after running `./validate.sh` —
-it checks exactly that.
-
-As a stopgap you can fetch the loader directly:
-
-```bash
-curl -fsSL -o ~/get-scripts.sh \
-  https://raw.githubusercontent.com/sven-reichelt/Ubuntu-Autoinstall/main/scripts/get-scripts.sh
-chmod +x ~/get-scripts.sh
-```
-</details>
-
-<details>
-<summary><strong>I lost the SSH connection after configure-network.sh</strong></summary>
-
-Nothing is broken. `netplan try` rolls back after 60 seconds — reconnect using
-the **old** IP address and start the script again with corrected values.
-
-If you can only reach the machine through the hypervisor console, the previous
-netplan files are in `/etc/netplan/configure-network.orig/`.
-</details>
-
-<details>
-<summary><strong>install-hfs.sh: the port is already in use</strong></summary>
-
-HFS runs with host networking, so it cannot share a port. Check what holds it:
-
-```bash
-sudo ss -ltnp 'sport = :80'
-```
-
-Then either stop that service or run the script again with a different port:
-
-```bash
-sudo ~/scripts/install-hfs.sh --port 8080
-```
-</details>
+What each script does, and all of their options, is on the
+[Scripts](Scripts.md) page.
