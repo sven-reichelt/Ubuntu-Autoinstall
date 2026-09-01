@@ -277,8 +277,44 @@ sudo ~/scripts/install-unifi-os-server.sh
 The script installs `podman` and `slirp4netns`, downloads the installer to
 `/var/tmp` (not `/tmp`, which is a RAM-backed tmpfs on some releases and too
 small), sanity-checks the download, runs it, verifies that the `uosserver`
-service exists afterwards, adds the user to the `uosserver` group, enables the
-service and waits up to five minutes for the web interface.
+service exists afterwards, sets up the group membership, enables the service and
+waits up to five minutes for the web interface.
+
+#### The operator account
+
+Membership in the `uosserver` group is what allows running `uosserver` commands
+without root. By default that is the account you are logged in with — normally
+the general-purpose admin of the machine. On a box that exists only to run
+UniFi, keeping system administration and UniFi operation apart is worth the two
+extra questions, so the script asks up front, before the installation starts:
+
+```
+==> Which Linux account should be allowed to run 'uosserver' commands?
+
+      1) ubuntu-admin (the account you are using now)
+      2) a separate account, created now
+      3) both
+      4) nobody for now - I will set the group membership myself
+```
+
+Choosing 2 or 3 asks for the account name (default `unifi`) and its password.
+Pressing Enter twice creates the account **without** a password: it is then
+locked for direct login and you switch to it with `sudo -iu unifi`. An account
+that already exists is only added to the group — its password is left alone.
+
+Non-interactively:
+
+```bash
+sudo ~/scripts/install-unifi-os-server.sh --operator unifi \
+     --operator-password 'secret' "https://fw-download.ubnt.com/..."
+
+sudo ~/scripts/install-unifi-os-server.sh --operator unifi --keep-current-user "https://..."
+sudo ~/scripts/install-unifi-os-server.sh --no-operator "https://..."
+sudo ~/scripts/install-unifi-os-server.sh --yes "https://..."   # keeps the calling user
+```
+
+Group membership only takes effect after a new login — for the separate account
+that is its first login anyway, for your own account it means logging out once.
 
 The web interface is then at `https://<SERVER-IP>:11443` — the certificate
 warning is expected.

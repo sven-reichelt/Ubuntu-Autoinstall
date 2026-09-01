@@ -19,6 +19,15 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   `CHANGELOG.md` and `docs/*.md` must resolve.
 - Release and pre-release badges in the README.
 
+- `install-unifi-os-server.sh` now asks which Linux account should be allowed
+  to run `uosserver` commands: the calling account, a separate one created on
+  the spot (default name `unifi`), both, or none. Previously the general-purpose
+  admin account was always the one that got the group membership, which mixes
+  system administration and UniFi operation on a machine dedicated to UniFi.
+  The question comes before the installation, so the rest still runs unattended.
+  `--operator`, `--operator-password`, `--keep-current-user`, `--no-operator`
+  and `--yes` cover the non-interactive cases.
+
 ### Fixed
 
 - `install-hfs.sh` left behind a server that could not be administered
@@ -35,8 +44,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   build inside the container image drops that key when it rewrites the
   configuration and creates nothing — which is also the reason the image's own
   bootstrap, writing exactly that key, leaves no usable login behind.
-- `--help` no longer requires root in `install-hfs.sh` and `system-update.sh` —
-  the root check ran before the argument parsing.
+- `--help` no longer requires root in `install-hfs.sh`, `system-update.sh` and
+  `install-unifi-os-server.sh` — the root check ran before the argument parsing.
 - Anchor links did not scroll on wiki pages. GitHub renders headings with
   `id="user-content-<slug>"` everywhere, but only repository pages carry the
   JavaScript that also makes the short `#<slug>` jump there. `build-wiki.sh`
